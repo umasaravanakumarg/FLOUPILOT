@@ -7,29 +7,36 @@ PostgreSQL pilot. A partial configuration is an error, not a fallback to demo.
 
 `SUPABASE_ANON_KEY` is the Supabase project publishable/anon key. It is used by
 the server-side SSR client with the signed-in user's session and PostgreSQL RLS.
+Registration calls `auth.signUp()` from a server action through this client.
 Do not set `SUPABASE_SERVICE_ROLE_KEY`, a database password, or any privileged
-key in this application. No service-role client or browser Supabase client is
-implemented.
+key in this application. No service-role client is implemented.
 
 ## Provision a disposable project
 
-1. Create a non-production Supabase project for integration testing. Disable
-   public sign-ups and configure the desired password policy, email delivery,
-   redirect URLs, MFA requirements, backup policy, and allowed origins.
+1. Create a non-production Supabase project for integration testing. Enable
+   email sign-ups and configure the desired password policy, email delivery,
+   redirect URLs, MFA requirements, backup policy, and allowed origins. Keep
+   email confirmation enabled for hosted deployments.
 2. Install/use the Supabase CLI, authenticate, and link the project. Apply
    migrations with `supabase db push`; review the migration SQL and resulting
    grants/RLS policies in the Supabase dashboard before connecting the app.
 3. Copy `.env.example` to `.env.local` and set `SUPABASE_URL` and
    `SUPABASE_ANON_KEY` from project API settings. Keep the file out of Git and
    restart Next.js. Missing/incomplete settings must not be used to test auth.
-4. Create/invite a pilot user through Supabase Auth administration. The app has
-   no public sign-up or membership-management screen.
-5. As a database administrator, provision a tenant, the user's tenant
-   membership, production membership, production, departments, and budget
-   allocations. An owner/admin membership grants tenant-wide access; other
-   users need a `member` tenant row and an explicit production membership.
-   Membership grants should be minimum necessary. The first owner/admin is a
-   bootstrap operation and must be performed via the trusted dashboard/CLI.
+4. In Supabase Auth URL Configuration, set the production Site URL and allow
+   the production callback URL `https://<your-domain>/auth/callback`. Add
+   localhost and Vercel preview callback URLs only for the environments that
+   need them, and configure production SMTP so confirmation messages are
+   delivered reliably. The app exchanges confirmation codes server-side and
+   does not accept arbitrary post-auth redirect destinations.
+5. Public registration creates an Auth identity only. It never creates a
+   tenant or production membership. As a database administrator, provision a
+   tenant, the user's tenant membership, production membership, production,
+   departments, and budget allocations. An owner/admin membership grants
+   tenant-wide access; other users need a `member` tenant row and an explicit
+   production membership. Membership grants should be minimum necessary. The
+   first owner/admin is a bootstrap operation and must be performed via the
+   trusted dashboard/CLI.
 6. Test with separate users and tenants and the access matrix below before
    entering any real financial data.
 
