@@ -23,7 +23,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { getDepartmentSnapshot, getProductionSnapshot } from "@/lib/finance";
+import {
+  getDepartmentSnapshot,
+  getProductionSnapshot,
+  isForecastOverOriginalBudget,
+} from "@/lib/finance";
 import type { FinanceState, ModuleId } from "@/lib/types";
 import { Button, Card, EmptyState, formatCr, formatLakhs, formatMoney, SectionTitle, StatusPill } from "./ui";
 
@@ -208,7 +212,7 @@ export function DashboardModule({
           </button>)}
         </div> : <EmptyState title="No ledger entries" description="New expenses will appear here." />}
       </Card>
-      {summary.variancePaise > 0 && <div className="flex gap-3 rounded-2xl border border-rose-500/15 bg-rose-500/[0.04] p-4 text-sm text-rose-100"><AlertTriangle size={18} className="mt-0.5 shrink-0 text-rose-300" /><p>Forecast is {formatLakhs(summary.variancePaise)} above the original allocation. Commitments are shown separately and are not added a second time to forecast.</p></div>}
+      {isForecastOverOriginalBudget(summary.forecastPaise, summary.originalBudgetPaise) && <div className="flex gap-3 rounded-2xl border border-rose-500/15 bg-rose-500/[0.04] p-4 text-sm text-rose-100"><AlertTriangle size={18} className="mt-0.5 shrink-0 text-rose-300" /><p>Forecast is {formatLakhs(summary.variancePaise)} above the original allocation. Commitments are shown separately and are not added a second time to forecast.</p></div>}
     </div>
   );
 }

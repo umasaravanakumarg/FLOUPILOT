@@ -26,6 +26,13 @@ export interface ProductionSnapshot {
   health: Production["status"];
 }
 
+export function isForecastOverOriginalBudget(
+  forecastPaise: number,
+  originalBudgetPaise: number,
+): boolean {
+  return forecastPaise > originalBudgetPaise;
+}
+
 const affectsFinance = (expense: Expense) =>
   expense.source === "user" || expense.workflowTouched === true;
 

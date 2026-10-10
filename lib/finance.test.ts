@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { answerDemoQuestion } from "./ai-demo";
-import { getDepartmentSnapshot, getPendingApprovals, getProductionSnapshot } from "./finance";
+import {
+  getDepartmentSnapshot,
+  getPendingApprovals,
+  getProductionSnapshot,
+  isForecastOverOriginalBudget,
+} from "./finance";
 import { createInitialState } from "./demo-state";
 import { financeReducer } from "./finance-state";
 import type { Expense } from "./types";
@@ -41,6 +46,37 @@ describe("financial calculations", () => {
     const after = getProductionSnapshot(state, state.productions[0]);
     expect(after.revisedBudgetPaise - before.revisedBudgetPaise).toBe(150_000_000);
     expect(state.departments.find((department) => department.id === "art")?.revisedPaise).toBe(1_200_000_000);
+  });
+
+  it("does not alert when a ₹10 lakh budget has no spend, commitments, or forecast inputs", () => {
+    const initial = createInitialState();
+    const production = {
+      ...initial.productions[0],
+      originalBudgetPaise: 100_000_000,
+      revisedBudgetPaise: 100_000_000,
+      baselineActualPaise: 0,
+      baselineCommittedPaise: 0,
+      baselineForecastPaise: 0,
+      baselinePendingApprovals: 0,
+    };
+    const state = {
+      ...initial,
+      selectedProductionId: production.id,
+      productions: [production],
+      departments: [],
+      expenses: [],
+      approvals: [],
+      payments: [],
+    };
+
+    const snapshot = getProductionSnapshot(state, production);
+    expect(snapshot.originalBudgetPaise).toBe(100_000_000);
+    expect(snapshot.actualPaise).toBe(0);
+    expect(snapshot.committedPaise).toBe(0);
+    expect(snapshot.remainingPaise).toBe(100_000_000);
+    expect(snapshot.forecastPaise).toBe(0);
+    expect(snapshot.variancePaise).toBe(-100_000_000);
+    expect(isForecastOverOriginalBudget(snapshot.forecastPaise, snapshot.originalBudgetPaise)).toBe(false);
   });
 });
 
