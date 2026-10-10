@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const chunksDirectory = join(process.cwd(), ".next", "static", "chunks");
+const staticDirectory = join(process.cwd(), ".next", "static");
 const fixtureMarkers = ["Studio Noir", "EXP-301", "Project Alpha"];
 const violations = [];
 
@@ -20,7 +20,7 @@ async function scan(directory) {
   }
 }
 
-await scan(chunksDirectory);
+await scan(staticDirectory);
 if (violations.length) {
   for (const violation of violations) {
     console.error(`Demo fixture "${violation.marker}" is present in client bundle ${violation.path}`);
