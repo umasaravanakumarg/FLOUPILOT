@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -22,13 +22,15 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import { createInitialState, financeReducer } from "@/lib/finance-state";
-import type { FinanceState, ModuleId } from "@/lib/types";
+import { financeReducer } from "@/lib/finance-state";
+import type { FinanceAction, FinanceState, ModuleId } from "@/lib/types";
 import { DashboardModule } from "./dashboard";
 import { ApprovalsModule, BudgetModule, ExpensesModule } from "./budget-expenses";
 import { AiModule, ReportsModule, SettingsModule } from "./insights";
 import { CrewModule, ProductionsModule, VendorsModule } from "./operations";
 import { Button } from "./ui";
+import { mutatePilotFinance } from "@/lib/supabase/pilot-action";
+import { signOut } from "@/app/actions/auth";
 
 const navigation: { id: ModuleId; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -45,8 +47,18 @@ const navigation: { id: ModuleId; label: string; icon: typeof LayoutDashboard }[
 
 type SearchHit = { id: string; title: string; detail: string; module: ModuleId };
 
-export function FlouApp() {
-  const [state, dispatch] = useReducer(financeReducer, undefined, createInitialState);
+export function FlouApp({
+  mode,
+  initialState,
+}: {
+  mode: "demo" | "supabase";
+  initialState: FinanceState;
+}) {
+  const [state, reducerDispatch] = useReducer(
+    financeReducer,
+    initialState,
+  );
+  const [isPending, startTransition] = useTransition();
   const [module, setModule] = useState<ModuleId>("dashboard");
   const [search, setSearch] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -57,11 +69,28 @@ export function FlouApp() {
   const [focusedDepartmentId, setFocusedDepartmentId] = useState<string | null>(null);
   const [focusedExpenseDepartmentId, setFocusedExpenseDepartmentId] = useState<string | null>(null);
   const [focusExpenseId, setFocusExpenseId] = useState<string | null>(null);
-  const [restored, setRestored] = useState(false);
+  const [restored, setRestored] = useState(mode === "supabase");
   const persistenceFailureShown = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
+  const dispatch = useCallback((action: FinanceAction) => {
+    if (mode === "demo" || action.type === "production/select" || action.type === "notice/clear") {
+      reducerDispatch(action);
+      return;
+    }
+    startTransition(async () => {
+      const result = await mutatePilotFinance(action, state.selectedProductionId);
+      if (!result.ok) {
+        reducerDispatch({ type: "notice/show", kind: "error", message: result.message });
+        return;
+      }
+      reducerDispatch({ type: "state/restore", state: result.state });
+      reducerDispatch({ type: "notice/show", kind: "success", message: "Change saved to the secure pilot workspace." });
+    });
+  }, [mode, reducerDispatch, startTransition, state.selectedProductionId]);
+
   useEffect(() => {
+    if (mode !== "demo") return;
     try {
       const raw = localStorage.getItem("flou-pilot-demo-state");
       if (raw) {
@@ -78,30 +107,30 @@ export function FlouApp() {
           Array.isArray(saved.payments) &&
           Array.isArray(saved.activity)
         ) {
-          dispatch({ type: "state/restore", state: saved });
+          reducerDispatch({ type: "state/restore", state: saved });
         } else {
-          dispatch({ type: "notice/show", kind: "error", message: "Saved demo data is incomplete. The seeded workspace has been loaded instead." });
+          reducerDispatch({ type: "notice/show", kind: "error", message: "Saved demo data is incomplete. The seeded workspace has been loaded instead." });
         }
       }
     } catch {
-      dispatch({ type: "notice/show", kind: "error", message: "Saved demo data could not be read. The in-memory demo data is still available." });
+      reducerDispatch({ type: "notice/show", kind: "error", message: "Saved demo data could not be read. The in-memory demo data is still available." });
     } finally {
       setRestored(true);
     }
-  }, []);
+  }, [mode, reducerDispatch]);
 
   useEffect(() => {
-    if (!restored) return;
+    if (mode !== "demo" || !restored) return;
     try {
       localStorage.setItem("flou-pilot-demo-state", JSON.stringify(state));
       persistenceFailureShown.current = false;
     } catch {
       if (!persistenceFailureShown.current) {
         persistenceFailureShown.current = true;
-        dispatch({ type: "notice/show", kind: "error", message: "Changes are active for this session but could not be saved in this browser." });
+        reducerDispatch({ type: "notice/show", kind: "error", message: "Changes are active for this session but could not be saved in this browser." });
       }
     }
-  }, [restored, state]);
+  }, [mode, restored, state, reducerDispatch]);
 
   useEffect(() => {
     const updateSetting = (event: Event) => {
@@ -128,9 +157,9 @@ export function FlouApp() {
 
   useEffect(() => {
     if (!state.notice) return;
-    const timeout = window.setTimeout(() => dispatch({ type: "notice/clear" }), 3600);
+    const timeout = window.setTimeout(() => reducerDispatch({ type: "notice/clear" }), 3600);
     return () => window.clearTimeout(timeout);
-  }, [state.notice]);
+  }, [state.notice, reducerDispatch]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -204,7 +233,7 @@ export function FlouApp() {
       case "reports":
         return <ReportsModule state={state} onNavigate={goTo} />;
       case "ai":
-        return <AiModule key={state.selectedProductionId} state={state} onNavigate={goTo} onFocusExpenses={(id) => setFocusedExpenseDepartmentId(id)} />;
+        return <AiModule key={state.selectedProductionId} state={state} serverMode={mode === "supabase"} onNavigate={goTo} onFocusExpenses={(id) => setFocusedExpenseDepartmentId(id)} />;
       case "settings":
         return <SettingsModule />;
     }
@@ -221,7 +250,7 @@ export function FlouApp() {
           {navigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => goTo(id)} title={!sidebarOpen ? label : undefined} aria-current={module === id ? "page" : undefined} className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${module === id ? "bg-amber-300/[0.1] text-amber-100 ring-1 ring-inset ring-amber-300/20" : "text-slate-400 hover:bg-white/[0.04] hover:text-slate-100"} ${sidebarOpen ? "" : "justify-center px-0"}`}><Icon size={17} /><span className={sidebarOpen ? "text-[13px] font-medium" : "sr-only"}>{label}</span>{id === "approvals" && sidebarOpen && <span className="ml-auto rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] text-rose-200">{state.approvals.filter((item) => item.productionId === state.selectedProductionId && item.status === "Pending").length}</span>}</button>)}
         </nav>
         {sidebarOpen && <div className="m-3 rounded-xl border border-rose-400/10 bg-rose-400/[0.035] p-3"><div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-200"><AlertTriangle size={13} /> Forecast alert</div><p className="mt-2 text-xs leading-5 text-slate-300">Forecast is above the current original allocation.</p><button type="button" onClick={() => goTo("ai")} className="mt-2 text-xs font-medium text-amber-200 hover:text-amber-100">Ask Pilot why <span aria-hidden="true">→</span></button></div>}
-        {sidebarOpen && <div className="border-t border-white/[0.08] p-4"><div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">Demo workspace</div><div className="mt-1 truncate text-xs text-slate-300">South Coast Pictures</div></div>}
+        {sidebarOpen && <div className="border-t border-white/[0.08] p-4"><div className="text-[10px] uppercase tracking-[0.2em] text-slate-500">{mode === "demo" ? "Demo workspace" : "Authenticated workspace"}</div><div className="mt-1 truncate text-xs text-slate-300">{mode === "demo" ? "South Coast Pictures" : "Production access is membership-scoped"}</div></div>}
       </aside>
       <main className={`min-w-0 flex-1 transition-[margin] duration-200 lg:ml-64 ${!sidebarOpen ? "lg:ml-[76px]" : ""}`}>
         <header className="sticky top-0 z-20 border-b border-white/[0.08] bg-[#0a1015]/95 px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-8">
@@ -247,7 +276,7 @@ export function FlouApp() {
             </div>
             <div className="relative">
               <button type="button" onClick={() => { setProfileOpen((value) => !value); setNotificationsOpen(false); }} aria-expanded={profileOpen} className="hidden items-center gap-2 rounded-xl border border-white/[0.09] bg-white/[0.025] px-2 py-1.5 sm:flex"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-700 text-xs font-semibold text-white">P</span><span className="hidden text-xs text-slate-300 xl:block">Producer</span><ChevronDown size={13} className="text-slate-500" /></button>
-              {profileOpen && <div className="absolute right-0 top-12 z-40 w-52 rounded-xl border border-white/10 bg-[#101922] p-2 shadow-2xl"><div className="px-2 py-2"><p className="text-xs font-medium text-white">Producer workspace</p><p className="mt-1 text-[10px] text-slate-500">South Coast Pictures</p></div><button type="button" onClick={() => { setProfileOpen(false); goTo("settings"); }} className="w-full rounded-lg px-2 py-2 text-left text-xs text-slate-300 hover:bg-white/[0.05]">Workspace settings</button></div>}
+              {profileOpen && <div className="absolute right-0 top-12 z-40 w-52 rounded-xl border border-white/10 bg-[#101922] p-2 shadow-2xl"><div className="px-2 py-2"><p className="text-xs font-medium text-white">{mode === "demo" ? "Producer workspace" : "Authenticated user"}</p><p className="mt-1 text-[10px] text-slate-500">{mode === "demo" ? "South Coast Pictures" : "Access managed by workspace roles"}</p></div><button type="button" onClick={() => { setProfileOpen(false); goTo("settings"); }} className="w-full rounded-lg px-2 py-2 text-left text-xs text-slate-300 hover:bg-white/[0.05]">Workspace settings</button>{mode === "supabase" && <form action={signOut}><button type="submit" className="w-full rounded-lg px-2 py-2 text-left text-xs text-rose-200 hover:bg-white/[0.05]">Sign out</button></form>}</div>}
             </div>
           </div>
           {mobileNavOpen && <div className="mt-3 border-t border-white/[0.08] pt-3 lg:hidden"><label htmlFor="mobile-production" className="mb-2 block text-[10px] uppercase tracking-[0.2em] text-slate-500">Active production</label><select id="mobile-production" value={state.selectedProductionId} onChange={(event) => dispatch({ type: "production/select", productionId: event.target.value })} className="mb-3 w-full rounded-lg border border-white/10 bg-[#101922] px-3 py-2 text-sm text-white">{state.productions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><nav aria-label="Mobile navigation" className="grid grid-cols-2 gap-1">{navigation.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => goTo(id)} aria-current={module === id ? "page" : undefined} className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${module === id ? "bg-amber-300/10 text-amber-100" : "text-slate-400 hover:bg-white/[0.04]"}`}><Icon size={15} />{label}</button>)}</nav></div>}
@@ -255,10 +284,11 @@ export function FlouApp() {
         <div className="mx-auto max-w-[1480px] px-4 py-5 pb-12 sm:px-6 sm:py-7 lg:px-8">
           {!restored && <div className="mb-5 h-16 animate-pulse rounded-2xl border border-white/[0.07] bg-[#101922]" aria-label="Loading saved workspace" />}
           {renderModule()}
-          <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-4 text-[10px] text-slate-600"><span>FLOU Pilot · Production finance command center</span><span className="flex items-center gap-1.5"><Activity size={12} /> Demo data · browser-local workspace</span></footer>
+          <footer className="mt-8 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-4 text-[10px] text-slate-600"><span>FLOU Pilot · Production finance command center</span><span className="flex items-center gap-1.5"><Activity size={12} />{mode === "demo" ? "Demo data · browser-local workspace" : "Authenticated · PostgreSQL-backed workspace"}</span></footer>
         </div>
       </main>
     </div>
     {state.notice && <div role={state.notice.kind === "error" ? "alert" : "status"} className={`fixed bottom-5 right-4 z-50 flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-xl border px-4 py-3 text-sm shadow-2xl sm:right-6 ${state.notice.kind === "error" ? "border-rose-400/20 bg-[#241215] text-rose-100" : "border-emerald-400/20 bg-[#0e2019] text-emerald-100"}`}><span className="flex-1">{state.notice.message}</span><button type="button" onClick={() => dispatch({ type: "notice/clear" })} aria-label="Dismiss notification"><X size={15} /></button></div>}
+    {isPending && <div role="status" aria-live="polite" className="fixed bottom-5 left-4 z-40 rounded-xl border border-amber-300/20 bg-[#17160e] px-4 py-3 text-sm text-amber-100 shadow-2xl sm:left-6">Saving securely…</div>}
   </div>;
 }

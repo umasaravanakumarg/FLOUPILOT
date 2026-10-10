@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { answerDemoQuestion } from "./ai-demo";
 import { getDepartmentSnapshot, getPendingApprovals, getProductionSnapshot } from "./finance";
-import { createInitialState, financeReducer } from "./finance-state";
+import { createInitialState } from "./demo-state";
+import { financeReducer } from "./finance-state";
 import type { Expense } from "./types";
 
 const today = "2026-10-10";
@@ -106,6 +107,82 @@ describe("expense, approval, and payment workflows", () => {
     expect(paid.actualPaise - initial.actualPaise).toBe(320_000_000);
     expect(paid.committedPaise).toBe(initial.committedPaise);
     expect(paid.forecastPaise).toBe(approved.forecastPaise);
+    expect(state.approvals.find((approval) => approval.expenseId === "EXP-301")?.status).toBe("Paid");
+  });
+
+  it("derives authoritative totals from persisted records without demo baselines", () => {
+    const seed = createInitialState();
+    const production = {
+      ...seed.productions[0],
+      baselineActualPaise: 0,
+      baselineCommittedPaise: 0,
+      baselineForecastPaise: 0,
+      baselinePendingApprovals: 0,
+    };
+    const expense: Expense = {
+      id: "00000000-0000-4000-8000-000000000001",
+      productionId: production.id,
+      title: "Verified unit rental",
+      vendor: "Approved vendor",
+      departmentId: "art",
+      date: today,
+      amountPaise: 4_200_000,
+      status: "Pending",
+      description: "",
+      source: "user",
+      workflowTouched: true,
+    };
+    const state = {
+      ...seed,
+      selectedProductionId: production.id,
+      productions: [production],
+      departments: seed.departments
+        .filter((department) => department.productionId === production.id)
+        .map((department) => ({
+          ...department,
+          baselineActualPaise: 0,
+          baselineCommittedPaise: 0,
+          baselineForecastPaise: 0,
+        })),
+      expenses: [expense],
+      approvals: [{
+        id: "00000000-0000-4000-8000-000000000002",
+        productionId: production.id,
+        expenseId: expense.id,
+        title: expense.title,
+        owner: "Finance",
+        amountPaise: expense.amountPaise,
+        priority: "Medium" as const,
+        status: "Pending" as const,
+        rationale: "Awaiting review.",
+      }],
+    };
+    const before = getProductionSnapshot(state, production);
+    expect(before.actualPaise).toBe(0);
+    expect(before.committedPaise).toBe(4_200_000);
+    expect(before.forecastPaise).toBe(4_200_000);
+    expect(before.pendingApprovals).toBe(1);
+
+    const approvedState = financeReducer(state, {
+      type: "approval/decide",
+      approvalId: "00000000-0000-4000-8000-000000000002",
+      decision: "Approved",
+    });
+    const approved = getProductionSnapshot(approvedState, production);
+    expect(approved.actualPaise).toBe(0);
+    expect(approved.committedPaise).toBe(4_200_000);
+    expect(approved.forecastPaise).toBe(4_200_000);
+    expect(approved.pendingApprovals).toBe(0);
+
+    const paidState = financeReducer(approvedState, {
+      type: "expense/pay",
+      expenseId: expense.id,
+    });
+    const paid = getProductionSnapshot(paidState, production);
+    expect(paid.actualPaise).toBe(4_200_000);
+    expect(paid.committedPaise).toBe(0);
+    expect(paid.forecastPaise).toBe(4_200_000);
+    expect(paidState.approvals[0].status).toBe("Paid");
   });
 
   it("tracks approved standalone requests as commitments until payment", () => {

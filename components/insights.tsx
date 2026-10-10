@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Activity, ArrowRight, Download, Info, RotateCcw, Send, ShieldCheck, Sparkles } from "lucide-react";
 import { answerDemoQuestion, type AiResponse } from "@/lib/ai-demo";
 import { getDepartmentSnapshot, getProductionSnapshot } from "@/lib/finance";
 import type { FinanceState, ModuleId } from "@/lib/types";
 import { Button, Card, EmptyState, fieldClass, formatCr, formatMoney, SectionTitle, StatusPill, TableFrame } from "./ui";
+import { requestPilotAnalysis } from "@/lib/supabase/pilot-action";
 
 export function ReportsModule({ state, onNavigate }: { state: FinanceState; onNavigate: (module: ModuleId) => void }) {
   const [report, setReport] = useState<"financial" | "department" | "activity">("financial");
@@ -29,28 +30,43 @@ export function ReportsModule({ state, onNavigate }: { state: FinanceState; onNa
   </div>;
 }
 
-export function AiModule({ state, onNavigate, onFocusExpenses }: { state: FinanceState; onNavigate: (module: ModuleId) => void; onFocusExpenses: (departmentId: string | null) => void }) {
+export function AiModule({ state, serverMode, onNavigate, onFocusExpenses }: { state: FinanceState; serverMode: boolean; onNavigate: (module: ModuleId) => void; onFocusExpenses: (departmentId: string | null) => void }) {
   const [question, setQuestion] = useState("");
+  const [isPending, startTransition] = useTransition();
   const [response, setResponse] = useState<AiResponse>(() => answerDemoQuestion("Why is the Art department over budget?", state));
   const ask = (value: string) => {
     const clean = value.trim();
-    if (!clean) return;
+    if (!clean || isPending) return;
     setQuestion(clean);
-    setResponse(answerDemoQuestion(clean, state));
     setQuestion("");
+    if (!serverMode) {
+      setResponse(answerDemoQuestion(clean, state));
+      return;
+    }
+    startTransition(async () => {
+      try {
+        setResponse(await requestPilotAnalysis(clean, state.selectedProductionId));
+      } catch {
+        setResponse({
+          ...answerDemoQuestion(clean, state),
+          disclaimer: "Secure server analysis could not be reached. Showing deterministic analysis from the authorized workspace snapshot.",
+        });
+      }
+    });
   };
   const prompts = ["Why is Art over budget?", "Which approvals are still pending?", "Summarize the current financial outlook", "What does the expense ledger include?"];
   return <div className="space-y-6">
-    <SectionTitle eyebrow="Explainable intelligence" title="AI Pilot" description="This offline demonstration uses deterministic rules over the current demo and user-entered data. No external AI provider, OCR, or hidden dataset is connected." actions={<StatusPill label="Offline demo" tone="watch" />} />
+    <SectionTitle eyebrow="Explainable intelligence" title="AI Pilot" description={serverMode ? "Answers use the selected production's authorized workspace records. Deterministic explanations remain available when no provider is configured." : "This offline demonstration uses deterministic rules over the current demo and user-entered data. No external AI provider, OCR, or hidden dataset is connected."} actions={<StatusPill label={serverMode ? "Secure workspace" : "Offline demo"} tone="watch" />} />
     <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
       <Card>
         <div className="flex items-center gap-2"><Sparkles size={17} className="text-amber-200" /><h2 className="font-semibold text-white">Ask about this production</h2></div>
-        <p className="mt-2 text-sm leading-6 text-slate-400">Responses cite only the production summary, budgets, approvals and sample expenses currently available.</p>
-        <form className="mt-5 flex gap-2" onSubmit={(event) => { event.preventDefault(); ask(question); }}><input aria-label="Ask Pilot a question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask why a budget is at risk…" className={fieldClass} /><Button type="submit" variant="primary" aria-label="Send question"><Send size={15} /></Button></form>
+        <p className="mt-2 text-sm leading-6 text-slate-400">{serverMode ? "Responses use only financial records authorized for your signed-in account." : "Responses cite only the production summary, budgets, approvals and sample expenses currently available."}</p>
+        <form className="mt-5 flex gap-2" onSubmit={(event) => { event.preventDefault(); ask(question); }}><input aria-label="Ask Pilot a question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask why a budget is at risk…" maxLength={500} className={fieldClass} /><Button type="submit" variant="primary" aria-label="Send question" disabled={isPending}><Send size={15} /></Button></form>
+        {isPending && <p role="status" className="mt-2 text-xs text-amber-200">Checking the authorized workspace records…</p>}
         <div className="mt-5 space-y-2"><p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Suggested questions</p>{prompts.map((prompt) => <button key={prompt} type="button" onClick={() => ask(prompt)} className="flex w-full items-center justify-between rounded-xl border border-white/[0.07] px-3 py-2.5 text-left text-xs text-slate-300 hover:border-amber-300/25 hover:text-white"><span>{prompt}</span><ArrowRight size={13} /></button>)}</div>
       </Card>
       <Card>
-        <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] uppercase tracking-[0.22em] text-amber-200">Deterministic analysis</p><h2 className="mt-2 text-xl font-semibold text-white">{response.title}</h2></div><Sparkles size={19} className="shrink-0 text-amber-200" /></div>
+        <div className="flex items-start justify-between gap-3"><div><p className="text-[10px] uppercase tracking-[0.22em] text-amber-200">{response.disclaimer.startsWith("AI-generated") ? "AI-assisted narrative" : "Deterministic analysis"}</p><h2 className="mt-2 text-xl font-semibold text-white">{response.title}</h2></div><Sparkles size={19} className="shrink-0 text-amber-200" /></div>
         <p className="mt-4 text-sm leading-7 text-slate-300">{response.answer}</p>
         {response.evidence.length > 0 && <div className="mt-5 rounded-xl border border-white/[0.07] bg-black/15 p-4"><h3 className="mb-3 flex items-center gap-2 text-xs font-medium text-slate-200"><ShieldCheck size={14} className="text-emerald-300" /> Evidence from current records</h3><ul className="space-y-2">{response.evidence.map((item) => <li key={item} className="flex gap-2 text-xs leading-5 text-slate-400"><span className="text-amber-200">·</span>{item}</li>)}</ul></div>}
         <div className="mt-5 flex flex-wrap gap-2">{response.actions.map((action) => <Button key={`${action.module}-${action.label}`} onClick={() => {

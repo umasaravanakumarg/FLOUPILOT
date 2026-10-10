@@ -1,4 +1,3 @@
-import { initialFinanceState } from "./demo-data";
 import type {
   Approval,
   Expense,
@@ -27,7 +26,7 @@ function appendActivity(state: FinanceState, productionId: string, message: stri
 
 export function financeReducer(
   state: FinanceState,
-  action: FinanceAction | { type: "notice/clear" },
+  action: FinanceAction,
 ): FinanceState {
   if (action.type === "notice/clear") {
     return { ...state, notice: undefined };
@@ -214,6 +213,11 @@ export function financeReducer(
           expenses: state.expenses.map((item) =>
             item.id === expense.id ? { ...item, status: "Paid", workflowTouched: true } : item,
           ),
+          approvals: state.approvals.map((item) =>
+            item.expenseId === expense.id && item.status === "Approved"
+              ? { ...item, status: "Paid" }
+              : item,
+          ),
           activity: appendActivity(state, expense.productionId, `Recorded payment for ${expense.title}`),
         },
         "Expense payment recorded.",
@@ -278,10 +282,6 @@ export function financeReducer(
       );
     }
   }
-}
-
-export function createInitialState(): FinanceState {
-  return structuredClone(initialFinanceState);
 }
 
 export function createExpenseId() {

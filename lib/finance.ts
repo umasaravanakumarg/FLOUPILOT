@@ -127,12 +127,17 @@ export function getProductionSnapshot(
     production.revisedBudgetPaise +
     (state.budgetRevisionDeltaPaise[production.id] ?? 0);
   const revisedVariancePaise = forecastPaise - revisedBudgetPaise;
-  const pendingApprovals = Math.max(
-    0,
-    production.baselinePendingApprovals -
-      decidedBaselineApprovals +
-      additionalPendingApprovals,
-  );
+  const pendingApprovals = production.baselinePendingApprovals === 0
+    ? state.approvals.filter(
+        (approval) =>
+          approval.productionId === production.id && approval.status === "Pending",
+      ).length
+    : Math.max(
+        0,
+        production.baselinePendingApprovals -
+          decidedBaselineApprovals +
+          additionalPendingApprovals,
+      );
   return {
     originalBudgetPaise: production.originalBudgetPaise,
     revisedBudgetPaise,

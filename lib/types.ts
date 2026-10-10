@@ -112,6 +112,7 @@ export interface FinanceState {
 
 export type FinanceAction =
   | { type: "notice/show"; kind: "success" | "error"; message: string }
+  | { type: "notice/clear" }
   | { type: "state/restore"; state: FinanceState }
   | { type: "production/select"; productionId: string }
   | { type: "production/update"; productionId: string; changes: Pick<Production, "name" | "type" | "industry" | "status"> }
